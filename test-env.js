@@ -24,7 +24,7 @@ if (dotenvResult.error) {
 
 // Test required environment variables
 let hasAllVars = true;
-const requiredVars = ['IMAP_USER', 'IMAP_PASSWORD', 'IMAP_HOST'];
+const requiredVars = ['IMAP_USER', 'IMAP_PASSWORD', 'IMAP_HOST', 'ANTHROPIC_API_KEY'];
 
 for (const varName of requiredVars) {
   if (!process.env[varName]) {

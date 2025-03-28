@@ -99,13 +99,10 @@ async function processEmail(mail) {
       }
     }
     
-    // Combine subject and content (without signature) into a single line
-    // Replace end of line characters with double spaces
+    // Use only the subject for now
     const subject_formatted = subject.replace(/\r?\n/g, '  ');
-    const content_formatted = content.replace(/\r?\n/g, '  ');
-    const combinedContent = `Subject: ${subject_formatted}  ${content_formatted}`;
     
-    console.log('Processing email content...');
+    console.log('Processing email subject only...');
     
     try {
       // Check if project folder is set
@@ -113,14 +110,28 @@ async function processEmail(mail) {
         console.warn('PROJECT_FOLDER environment variable not set. Using current directory.');
       }
       
-      // Prepare command: change to project folder if specified, then execute claude
-      // For now, we'll use echo to test the command execution
-      const changeDir = projectFolder ? `cd "${projectFolder}" && ` : '';
-      //const cmd = `${changeDir}echo "${combinedContent}"`;
-      const cmd = `${changeDir}claude -p "${combinedContent}" --allowedTools "Bash,Edit"`;
+      // Execute Claude CLI via shell script
+      const scriptPath = path.resolve(__dirname, 'run-claude.sh');
+      const allowedTools = "Bash,Edit";
+      const timeout = 240;
       
-      console.log('Executing command:', cmd.substring(0, 100) + '...');
-      const { stdout, stderr } = await execPromise(cmd);
+      // Call the shell script with arguments - properly escape the subject
+      const escapedSubject = subject_formatted.replace(/"/g, '\\"'); // Escape any double quotes in the subject
+      const cmd = `"${scriptPath}" "${projectFolder || '.'}" "${escapedSubject}" "${process.env.ANTHROPIC_API_KEY}" "${allowedTools}" ${timeout}`;
+      
+      console.log('Executing shell script to run Claude CLI...');
+      console.log(`Using subject: ${subject_formatted.substring(0, 50)}${subject_formatted.length > 50 ? '...' : ''}`);
+      
+      // Execute with a timeout longer than the script's internal timeout
+      const { stdout, stderr } = await execPromise(cmd, { timeout: 360000 }); // 6 minute timeout
+      
+      // Log execution details
+      console.log(`Shell script execution completed. Output length: ${stdout?.length || 0} characters`);
+      // First line of output
+      if (stdout && stdout.length > 0) {
+        const firstLine = stdout.split('\n')[0] || '';
+        console.log(`First line of output: ${firstLine.substring(0, 50)}${firstLine.length > 50 ? '...' : ''}`);
+      }
       
       console.log('Command execution response:');
       console.log(stdout);
@@ -138,8 +149,8 @@ Subject: ${subject}
 Original Content:
 ${content}
 
-Single-line Content:
-${combinedContent}
+Subject Only:
+${subject_formatted}
 
 === Command response ===
 ${stdout}
@@ -149,7 +160,27 @@ ${stderr ? `\nStderr: ${stderr}` : ''}
       fs.appendFileSync('claude-responses.log', logEntry);
       
     } catch (cmdError) {
-      console.error('Error executing command:', cmdError);
+      console.error('Error executing command:', cmdError.message);
+      
+      // Get the content of the log file if it exists
+      try {
+        const logFilePath = path.resolve(__dirname, 'claude-execution.log');
+        if (fs.existsSync(logFilePath)) {
+          const logContent = fs.readFileSync(logFilePath, 'utf8');
+          console.error('Claude execution log (last 500 characters):');
+          console.error(logContent.slice(-500));
+        }
+      } catch (logError) {
+        console.error('Failed to read log file:', logError.message);
+      }
+      
+      // Append error to the log entry
+      const errorLogEntry = `
+=== Claude CLI ERROR at ${new Date().toISOString()} ===
+Error: ${cmdError.message}
+${cmdError.stack || ''}
+`;
+      fs.appendFileSync('claude-errors.log', errorLogEntry);
     }
   } catch (err) {
     console.error('Error processing email:', err);
@@ -157,8 +188,8 @@ ${stderr ? `\nStderr: ${stderr}` : ''}
 }
 
 // Check for required environment variables
-if (!process.env.IMAP_USER || !process.env.IMAP_PASSWORD || !process.env.IMAP_HOST) {
-  console.error('Error: Missing required environment variables (IMAP_USER, IMAP_PASSWORD, IMAP_HOST)');
+if (!process.env.IMAP_USER || !process.env.IMAP_PASSWORD || !process.env.IMAP_HOST || !process.env.ANTHROPIC_API_KEY) {
+  console.error('Error: Missing required environment variables (IMAP_USER, IMAP_PASSWORD, IMAP_HOST, ANTHROPIC_API_KEY)');
   console.error('Please create a .env file or set environment variables');
   process.exit(1);
 }
@@ -178,6 +209,7 @@ console.log('- TLS Enabled:', process.env.IMAP_TLS !== 'false');
 console.log('- Mailbox:', process.env.IMAP_MAILBOX || 'INBOX');
 console.log('Claude Configuration:');
 console.log('- Project Folder:', process.env.PROJECT_FOLDER || '(current directory)');
+console.log('- Anthropic API Key:', process.env.ANTHROPIC_API_KEY ? '✓ Set' : '✗ Not set');
 
 // Start the IMAP notifier
 const imap = notifier(imapConfig);
