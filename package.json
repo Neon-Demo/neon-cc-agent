@@ -1,0 +1,23 @@
+{
+  "name": "neon-cc-agent",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "setup": "cp -n .env.example .env || echo '.env already exists'",
+    "test-env": "node test-env.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "SMTP server that forwards emails to Claude CLI",
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "imap": "^0.8.19",
+    "mail-notifier": "^0.5.0",
+    "mailparser": "^3.7.2",
+    "nodemailer": "^6.10.0",
+    "smtp-server": "^3.13.6"
+  }
+}
