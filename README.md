@@ -1,19 +1,19 @@
 # Neon Claude Code Agent
 
-An application that monitors an IMAP email account for new messages, extracts their content, and passes it to Claude CLI with specified tools.
+A Python application that monitors an IMAP email account for new messages, extracts their content, and passes it to Claude CLI with specified tools.
 
 ## Setup
 
 1. Install dependencies:
    ```
-   npm install
+   pip install -r requirements.txt
    ```
 
 2. Make sure Claude CLI is installed and accessible in your PATH
 
 3. Configure your IMAP email account:
    - Copy `.env.example` to `.env`
-   - Edit `.env` and add your IMAP email credentials
+   - Edit `.env` and add your IMAP email credentials and Anthropic API key
 
 ## IMAP Configuration
 
@@ -25,6 +25,7 @@ The application requires the following environment variables (in `.env` file or 
 - `IMAP_PORT`: IMAP server port (typically 993 for secure IMAP)
 - `IMAP_TLS`: Whether to use TLS (true/false)
 - `IMAP_MAILBOX`: Which mailbox to check (defaults to "INBOX")
+- `ANTHROPIC_API_KEY`: Your Anthropic API key for Claude
 
 ### Gmail-specific Setup
 
@@ -37,35 +38,41 @@ If you're using Gmail:
 
 1. Setup your environment file:
    ```
-   npm run setup
+   cp .env.example .env
    ```
-   Then edit the `.env` file with your IMAP email credentials.
+   Then edit the `.env` file with your IMAP email credentials and Anthropic API key.
 
-2. Test your environment setup:
+2. Make the Python script executable:
    ```
-   npm run test-env
+   chmod +x neon_cc_agent.py
    ```
-   This will verify that your environment variables are set correctly and that Claude CLI is available.
 
-3. Start the server:
+3. Start the application:
    ```
-   npm start
+   ./neon_cc_agent.py
+   ```
+   Or:
+   ```
+   python3 neon_cc_agent.py
    ```
 
 4. The application will:
    - Connect to your IMAP email account
-   - Listen for new unread emails
+   - Poll for new unread emails every 60 seconds
    - **Only process emails from "notifications@github.com"** (all other emails are ignored)
-   - When a GitHub notification email arrives, extract its subject and content
-   - Combine the subject and content with the format: `Subject: [subject]\n\n[content]`
-   - Pass the combined content to Claude CLI with the command: `claude -p "$(cat temp_file)" --allowedTools "Bash,Edit"`
+   - When a GitHub notification email arrives, extract its subject
+   - Pass the subject to Claude CLI with the command: `claude -p "subject" --allowedTools "Bash,Edit"`
    - Log Claude's response to the console and append to `claude-responses.log`
 
 ## Features
 
-- Monitors an IMAP mailbox for new messages
+- Monitors an IMAP mailbox for new messages by polling every minute
 - Filters emails to only process those from **notifications@github.com**
 - Processes unread emails (and marks them as read after processing)
-- Executes Claude CLI with email content
+- Executes Claude CLI with email subject
 - Logs all responses to console and a log file
 - Automatically reconnects if the IMAP connection is lost
+
+## Node.js Version
+
+An earlier Node.js implementation is available in the `nodejs/` directory for reference.

@@ -113,17 +113,26 @@ async function processEmail(mail) {
       // Execute Claude CLI via shell script
       const scriptPath = path.resolve(__dirname, 'run-claude.sh');
       const allowedTools = "Bash,Edit";
-      const timeout = 240;
+      const timeout = 300;
       
-      // Call the shell script with arguments - properly escape the subject
-      const escapedSubject = subject_formatted.replace(/"/g, '\\"'); // Escape any double quotes in the subject
-      const cmd = `"${scriptPath}" "${projectFolder || '.'}" "${escapedSubject}" "${process.env.ANTHROPIC_API_KEY}" "${allowedTools}" ${timeout}`;
+      // Use environment variables instead of command-line arguments
+      const env = {
+        ...process.env,
+        PROJECT_FOLDER: projectFolder || '.',
+        CLAUDE_SUBJECT: subject_formatted, 
+        ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+        ALLOWED_TOOLS: allowedTools,
+        TIMEOUT: timeout.toString()
+      };
       
       console.log('Executing shell script to run Claude CLI...');
       console.log(`Using subject: ${subject_formatted.substring(0, 50)}${subject_formatted.length > 50 ? '...' : ''}`);
       
       // Execute with a timeout longer than the script's internal timeout
-      const { stdout, stderr } = await execPromise(cmd, { timeout: 360000 }); // 6 minute timeout
+      const { stdout, stderr } = await execPromise(`"${scriptPath}"`, { 
+        timeout: 360000, // 6 minute timeout
+        env: env 
+      });
       
       // Log execution details
       console.log(`Shell script execution completed. Output length: ${stdout?.length || 0} characters`);
@@ -174,11 +183,10 @@ ${stderr ? `\nStderr: ${stderr}` : ''}
         console.error('Failed to read log file:', logError.message);
       }
       
-      // Append error to the log entry
+      // Append error to the log entry - avoid duplicate error messages
       const errorLogEntry = `
 === Claude CLI ERROR at ${new Date().toISOString()} ===
-Error: ${cmdError.message}
-${cmdError.stack || ''}
+${cmdError.stack || cmdError.message || 'Unknown error'}
 `;
       fs.appendFileSync('claude-errors.log', errorLogEntry);
     }
@@ -210,6 +218,25 @@ console.log('- Mailbox:', process.env.IMAP_MAILBOX || 'INBOX');
 console.log('Claude Configuration:');
 console.log('- Project Folder:', process.env.PROJECT_FOLDER || '(current directory)');
 console.log('- Anthropic API Key:', process.env.ANTHROPIC_API_KEY ? '✓ Set' : '✗ Not set');
+
+// Clear log files on startup for clarity
+const logFiles = [
+  path.resolve(__dirname, 'claude-errors.log'),
+  path.resolve(__dirname, 'claude-execution.log'),
+  path.resolve(__dirname, 'claude-responses.log'),
+  path.resolve(__dirname, 'claude-output.txt')
+];
+
+logFiles.forEach(file => {
+  try {
+    if (fs.existsSync(file)) {
+      fs.unlinkSync(file);
+      console.log(`Deleted log file: ${file}`);
+    }
+  } catch (err) {
+    console.error(`Failed to delete log file ${file}:`, err.message);
+  }
+});
 
 // Start the IMAP notifier
 const imap = notifier(imapConfig);
