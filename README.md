@@ -2,6 +2,21 @@
 
 A Python application that monitors an IMAP email account for new messages, extracts their content, and passes it to Claude CLI with specified tools.
 
+## Prerequisites
+
+1. **Claude Code CLI**:
+   - Install Claude Code CLI from [Claude Code documentation](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview)
+   - Log in to your Anthropic account: `claude login`
+   - Verify installation: `claude --version`
+
+2. **GitHub CLI**:
+   - Install the GitHub CLI from [GitHub CLI documentation](https://cli.github.com/manual/installation)
+   - Authenticate with your GitHub account: `gh auth login`
+   - Verify installation: `gh --version`
+
+3. **Python**:
+   - Python 3.8+ is required
+
 ## Setup
 
 1. Install dependencies:
@@ -9,9 +24,7 @@ A Python application that monitors an IMAP email account for new messages, extra
    pip install -r requirements.txt
    ```
 
-2. Make sure Claude CLI is installed and accessible in your PATH
-
-3. Configure your IMAP email account:
+2. Configure your IMAP email account:
    - Copy `.env.example` to `.env`
    - Edit `.env` and add your IMAP email credentials and Anthropic API key
 
@@ -70,8 +83,24 @@ If you're using Gmail:
 - Filters emails to only process those from **notifications@github.com**
 - Processes unread emails (and marks them as read after processing)
 - Executes Claude CLI with email subject
+- Allows Claude to perform GitHub operations using GitHub CLI
 - Logs all responses to console and a log file
 - Automatically reconnects if the IMAP connection is lost
+
+## Troubleshooting
+
+1. **Claude CLI Issues**:
+   - Ensure you are properly logged in with `claude login`
+   - Check that your Anthropic API key is valid
+   - Verify Claude CLI can run independently: `claude -p "Hello"`
+
+2. **GitHub CLI Issues**:
+   - Confirm you're authenticated with `gh auth status`
+   - Ensure you have appropriate repository permissions
+
+3. **Email Connection Issues**:
+   - Verify your IMAP credentials are correct
+   - If using Gmail, confirm that "Less secure app access" is enabled or app password is correctly set up
 
 ## Node.js Version
 
