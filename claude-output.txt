@@ -1,1 +1,0 @@
-Success! The pull request has been created. The landing page background color has been changed from white to pink, and this change will be ready for review and merging to the main branch.

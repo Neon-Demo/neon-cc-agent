@@ -7,6 +7,11 @@ yarn-error.log*
 lerna-debug.log*
 .pnpm-debug.log*
 
+# Claude output files
+claude-output.txt
+claude-error.txt
+claude-responses.log
+
 # Temporary files
 temp_*.txt
 temp_email_content.txt
@@ -45,6 +50,7 @@ build/Release
 # Dependency directories
 node_modules/
 jspm_packages/
+venv/
 
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
