@@ -121,11 +121,9 @@ if [ $EXIT_CODE -eq 124 ]; then
   exit $EXIT_CODE
 fi
 
-# If Claude executed successfully and we're in a git repository
-if [ $EXIT_CODE -eq 0 ] && [ -n "$GITHUB_REPO_URL" ] && [ -d "$WORKSPACE/.git" ]; then
-  echo "Claude execution completed. Checking for changes to commit..." >> "$LOG_FILE" 2>&1
+echo "Claude execution completed. Checking for changes to commit..." >> "$LOG_FILE" 2>&1
   
-  cd "$WORKSPACE"
+cd "$WORKSPACE"
   
   # Check if there are any changes
   if git status --porcelain | grep -q '^'; then
@@ -197,7 +195,6 @@ EOF
   else
     echo "No changes detected after Claude execution" >> "$LOG_FILE" 2>&1
   fi
-fi
 
 # Log completion
 echo "Claude CLI command completed at $(timestamp) with exit code: $EXIT_CODE" >> "$LOG_FILE" 2>&1
