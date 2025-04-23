@@ -426,7 +426,6 @@ else
         mkdir -p "$WORKSPACE"
         cd "$WORKSPACE"
         pwd >> "$LOG_FILE" 2>&1
-
         
         # Clone using gh cli which handles auth automatically
         if gh repo clone "$REPO_OWNER/$REPO_NAME" .; then
@@ -450,7 +449,7 @@ echo "Using subject: $CLAUDE_SUBJECT" >> "$LOG_FILE" 2>&1
 # Use timeout command to prevent hanging
 (
   # The command to run
-  timeout "$((TIMEOUT + 30))" claude -p "$CLAUDE_SUBJECT" --allowedTools "$ALLOWED_TOOLS" > "$OUTPUT_FILE" 2>> "$LOG_FILE"
+  timeout "$((TIMEOUT + 30))" claude -p "$CLAUDE_SUBJECT" --allowedTools "Bash,Edit" > "$OUTPUT_FILE" 2>> "$LOG_FILE"
 ) 
 
 # Capture exit code
@@ -463,12 +462,10 @@ if [ $EXIT_CODE -eq 124 ]; then
   exit $EXIT_CODE
 fi
 
-echo "Claude execution completed. Checking for changes to commit..." >> "$LOG_FILE" 2>&1
-  
-COMMIT_TASK="Review the git status and recent changes, then commit and push them using appropriate commit messages. Use git commands to check status, add files, commit, and push."
+# Check for changes and ask Claude to commit if needed
+COMMIT_TASK="Review the git status and recent changes, then commit and push them using appropriate commit messages. Use git commands to check status, add files, commit, and push.At the end create pull request"
   
 timeout "$((TIMEOUT))" claude -p "$COMMIT_TASK" --allowedTools "Bash,Edit" >> "$OUTPUT_FILE" 2>> "$LOG_FILE"
- 
 
 # Log completion
 echo "Claude CLI command completed at $(timestamp) with exit code: $EXIT_CODE" >> "$LOG_FILE" 2>&1
@@ -504,7 +501,7 @@ def main():
     load_environment()
     
     # Create Claude script
-    # create_claude_script()
+    create_claude_script()
     
     logger.info('IMAP email checker started')
     logger.info('Polling for emails...')

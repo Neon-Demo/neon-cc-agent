@@ -123,7 +123,7 @@ if [ $EXIT_CODE -eq 124 ]; then
 fi
 
 # Check for changes and ask Claude to commit if needed
-COMMIT_TASK="Review the git status and recent changes, then commit and push them using appropriate commit messages. Use git commands to check status, add files, commit, and push."
+COMMIT_TASK="Review the git status and recent changes, then commit and push them using appropriate commit messages. Use git commands to check status, add files, commit, and push.At the end create pull request"
   
 timeout "$((TIMEOUT))" claude -p "$COMMIT_TASK" --allowedTools "Bash,Edit" >> "$OUTPUT_FILE" 2>> "$LOG_FILE"
 
