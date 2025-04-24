@@ -203,8 +203,8 @@ def process_email(msg_data):
         logger.info(f'Extracted email from: {from_addr}')
         logger.info(f'Subject: {subject}')
         
-        # Check if the email is from notifications@github.com (case insensitive)
-        if 'notifications@github.com' not in from_addr.lower():
+        # Check if the email is from neon-cc-agent1@zerionsoftware.com (case insensitive)
+        if 'neon-cc-agent1@zerionsoftware.com' not in from_addr.lower():
             logger.info('Ignoring email - not from GitHub notifications')
             return
         
