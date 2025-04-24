@@ -20,6 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="$SCRIPT_DIR/claude-execution.log"
 OUTPUT_FILE="$SCRIPT_DIR/claude-output.txt"
 
+
 # Timestamp function
 timestamp() {
   date +"%Y-%m-%d %H:%M:%S"
@@ -107,10 +108,7 @@ echo "Executing Claude CLI command at $(timestamp)..." >> "$LOG_FILE" 2>&1
 echo "Using subject: $CLAUDE_SUBJECT" >> "$LOG_FILE" 2>&1
 
 # Use timeout command to prevent hanging
-(
-  # The command to run
-  timeout "$((TIMEOUT + 30))" claude -p "$CLAUDE_SUBJECT" --allowedTools "Bash,Edit" > "$OUTPUT_FILE" 2>> "$LOG_FILE"
-) 
+claude -p "$CLAUDE_SUBJECT" --allowedTools "Bash,Edit" > "$OUTPUT_FILE" 2>> "$LOG_FILE"
 
 # Capture exit code
 EXIT_CODE=$?
@@ -125,7 +123,7 @@ fi
 # Check for changes and ask Claude to commit if needed
 COMMIT_TASK="Review the git status and recent changes, then commit and push them using appropriate commit messages. Use git commands to check status, add files, commit, and push.At the end create pull request"
   
-timeout "$((TIMEOUT))" claude -p "$COMMIT_TASK" --allowedTools "Bash,Edit" >> "$OUTPUT_FILE" 2>> "$LOG_FILE"
+claude -p "$COMMIT_TASK" --allowedTools "Bash,Edit" >> "$OUTPUT_FILE" 2>> "$LOG_FILE"
 
 # Log completion
 echo "Claude CLI command completed at $(timestamp) with exit code: $EXIT_CODE" >> "$LOG_FILE" 2>&1
