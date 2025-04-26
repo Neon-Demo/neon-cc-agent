@@ -2,6 +2,10 @@
 
 A Python application that monitors an IMAP email account for new messages, extracts their content, and passes it to Claude CLI with specified tools.
 
+### Deployment 
+Site is deployed on EC2 instance using terraform script. The name of instance is neon-cc-agent and is deploy in us-east-1 region.
+To access running script type ```tmux ls``` and attach to already run process named neon.
+
 ## Prerequisites
 
 1. **Claude Code CLI**:
