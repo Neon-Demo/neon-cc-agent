@@ -366,6 +366,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="$SCRIPT_DIR/claude-execution.log"
 OUTPUT_FILE="$SCRIPT_DIR/claude-output.txt"
 
+echo $OUTPUT_FILE
+echo $LOG_FILE
 # Timestamp function
 timestamp() {
   date +"%Y-%m-%d %H:%M:%S"
@@ -410,29 +412,29 @@ if ! command -v gh &> /dev/null; then
   echo "WARNING: GitHub CLI not found in PATH - skipping repo clone" >> "$LOG_FILE" 2>&1
 else
   echo "GitHub CLI found at: $(which gh)" >> "$LOG_FILE" 2>&1
-  
+
   # Check if gh cli is authenticated
   if ! gh auth status &> /dev/null; then
     echo "WARNING: GitHub CLI not authenticated - skipping repo clone" >> "$LOG_FILE" 2>&1
   else
     echo "GitHub CLI authenticated successfully" >> "$LOG_FILE" 2>&1
-    
+
     # If we have a GitHub repo URL, try to clone it
     if [ -n "$GITHUB_REPO_URL" ]; then
       echo "Cloning repository from: $GITHUB_REPO_URL" >> "$LOG_FILE" 2>&1
-      
+
       # Extract repo owner and name from URL
       if [[ "$GITHUB_REPO_URL" =~ github\.com[:/]([^/]+)/([^/.]+) ]]; then
         REPO_OWNER="${BASH_REMATCH[1]}"
         REPO_NAME="${BASH_REMATCH[2]}"
-        
+
         # Create a clean workspace directory with repo name
         WORKSPACE="$PROJECT_FOLDER/workspace/$REPO_OWNER/$REPO_NAME"
         rm -rf "$WORKSPACE"
         mkdir -p "$WORKSPACE"
         cd "$WORKSPACE"
         pwd >> "$LOG_FILE" 2>&1
-        
+
         # Clone using gh cli which handles auth automatically
         if gh repo clone "$REPO_OWNER/$REPO_NAME" .; then
           echo "Successfully cloned repository to: $WORKSPACE" >> "$LOG_FILE" 2>&1
@@ -451,24 +453,39 @@ fi
 # Execute Claude CLI command with timeout to prevent hanging
 echo "Executing Claude CLI command at $(timestamp)..." >> "$LOG_FILE" 2>&1
 echo "Using subject: $CLAUDE_SUBJECT" >> "$LOG_FILE" 2>&1
+export NODE_OPTIONS="--no-warnings"
 
-# Use timeout command to prevent hanging
-claude -p "$CLAUDE_SUBJECT" --allowedTools "Bash,Edit" > "$OUTPUT_FILE" 2>> "$LOG_FILE"
+START_TIME=$(date +%s)
+{
+  timeout --kill-after=30 $TIMEOUT claude -p "$CLAUDE_SUBJECT" --allowedTools "Bash,Edit" 2>&1
+} | tee -a "$OUTPUT_FILE" | tee -a "$LOG_FILE"
+EXIT_CODE=${PIPESTATUS[0]}
+END_TIME=$(date +%s)
+DURATION=$((END_TIME - START_TIME))
 
-# Capture exit code
-EXIT_CODE=$?
+echo "Command execution took $DURATION seconds with exit code $EXIT_CODE" >> "$LOG_FILE" 2>&1
 
-# Check if timed out
-if [ $EXIT_CODE -eq 124 ]; then
-  echo "ERROR: Claude CLI command timed out after $((TIMEOUT + 30)) seconds" >> "$LOG_FILE" 2>&1
-  echo "ERROR: Claude CLI command timed out after $((TIMEOUT + 30)) seconds"
+if [ $EXIT_CODE -eq 124 ] || [ $EXIT_CODE -eq 137 ]; then
+  echo "ERROR: Claude CLI command timed out after $TIMEOUT seconds (exit code: $EXIT_CODE)" | tee -a "$LOG_FILE"
   exit $EXIT_CODE
+elif [ $EXIT_CODE -ne 0 ]; then
+  echo "ERROR: Claude CLI command failed with exit code $EXIT_CODE" | tee -a "$LOG_FILE"
+  echo "Command took $DURATION seconds to complete" | tee -a "$LOG_FILE"
+  exit $EXIT_CODE
+else
+  echo "Claude CLI command completed successfully in $DURATION seconds" >> "$LOG_FILE" 2>&1
 fi
 
-# Check for changes and ask Claude to commit if needed
+echo "Executing commit task at $(timestamp)..." >> "$LOG_FILE" 2>&1
 COMMIT_TASK="Review the git status and recent changes, then commit and push them using appropriate commit messages. Use git commands to check status, add files, commit, and push.At the end create pull request"
-  
-claude -p "$COMMIT_TASK" --allowedTools "Bash,Edit" >> "$OUTPUT_FILE" 2>> "$LOG_FILE"
+export NODE_OPTIONS="--no-warnings"
+START_TIME=$(date +%s)
+{
+  timeout --kill-after=30 $TIMEOUT claude -p "$COMMIT_TASK" --allowedTools "Bash,Edit" 2>&1
+} | tee -a "$OUTPUT_FILE" | tee -a "$LOG_FILE"
+COMMIT_EXIT_CODE=${PIPESTATUS[0]}
+END_TIME=$(date +%s)
+DURATION=$((END_TIME - START_TIME))
 
 # Log completion
 echo "Claude CLI command completed at $(timestamp) with exit code: $EXIT_CODE" >> "$LOG_FILE" 2>&1
@@ -498,7 +515,7 @@ exit $EXIT_CODE
 # Main function with continuous polling
 def main():
     # Clear log files
-    clear_log_files()
+    #clear_log_files()
     
     # Load environment variables
     load_environment()

@@ -107,23 +107,45 @@ fi
 echo "Executing Claude CLI command at $(timestamp)..." >> "$LOG_FILE" 2>&1
 echo "Using subject: $CLAUDE_SUBJECT" >> "$LOG_FILE" 2>&1
 
-# Use timeout command to prevent hanging
-claude -p "$CLAUDE_SUBJECT" --allowedTools "Bash,Edit" > "$OUTPUT_FILE" 2>> "$LOG_FILE"
+# Use NODE_OPTIONS to prevent file descriptor errors
+export NODE_OPTIONS="--no-warnings"
 
-# Capture exit code
-EXIT_CODE=$?
+START_TIME=$(date +%s)
+{
+  timeout --kill-after=30 $TIMEOUT claude -p "$CLAUDE_SUBJECT" --allowedTools "Bash,Edit" 2>&1
+} | tee -a "$OUTPUT_FILE" | tee -a "$LOG_FILE"
+EXIT_CODE=${PIPESTATUS[0]}
+END_TIME=$(date +%s)
+DURATION=$((END_TIME - START_TIME))
 
-# Check if timed out
-if [ $EXIT_CODE -eq 124 ]; then
-  echo "ERROR: Claude CLI command timed out after $((TIMEOUT + 30)) seconds" >> "$LOG_FILE" 2>&1
-  echo "ERROR: Claude CLI command timed out after $((TIMEOUT + 30)) seconds"
+echo "Command execution took $DURATION seconds with exit code $EXIT_CODE" >> "$LOG_FILE" 2>&1
+
+if [ $EXIT_CODE -eq 124 ] || [ $EXIT_CODE -eq 137 ]; then
+  echo "ERROR: Claude CLI command timed out after $TIMEOUT seconds (exit code: $EXIT_CODE)" | tee -a "$LOG_FILE"
   exit $EXIT_CODE
+elif [ $EXIT_CODE -ne 0 ]; then
+  echo "ERROR: Claude CLI command failed with exit code $EXIT_CODE" | tee -a "$LOG_FILE"
+  echo "Command took $DURATION seconds to complete" | tee -a "$LOG_FILE"
+  exit $EXIT_CODE
+else
+  echo "Claude CLI command completed successfully in $DURATION seconds" >> "$LOG_FILE" 2>&1
 fi
 
+
+echo "Executing commit task at $(timestamp)..." >> "$LOG_FILE" 2>&1
 # Check for changes and ask Claude to commit if needed
-COMMIT_TASK="Review the git status and recent changes, then commit and push them using appropriate commit messages. Use git commands to check status, add files, commit, and push.At the end create pull request"
-  
-claude -p "$COMMIT_TASK" --allowedTools "Bash,Edit" >> "$OUTPUT_FILE" 2>> "$LOG_FILE"
+COMMIT_TASK="Create a new branch for this issue and commit changes: then push them using appropriate commit messages. Use git commands to check status, add files, commit, and push.At the end create pull request"
+
+# Ensure NODE_OPTIONS is still set
+export NODE_OPTIONS="--no-warnings"
+
+START_TIME=$(date +%s)
+{
+  timeout --kill-after=30 $TIMEOUT claude -p "$COMMIT_TASK" --allowedTools "Bash,Edit" 2>&1
+} | tee -a "$OUTPUT_FILE" | tee -a "$LOG_FILE"
+COMMIT_EXIT_CODE=${PIPESTATUS[0]}
+END_TIME=$(date +%s)
+DURATION=$((END_TIME - START_TIME))
 
 # Log completion
 echo "Claude CLI command completed at $(timestamp) with exit code: $EXIT_CODE" >> "$LOG_FILE" 2>&1
