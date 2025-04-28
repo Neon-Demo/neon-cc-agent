@@ -82,6 +82,7 @@ def load_environment():
 def run_claude_cli(subject):
     try:
         github_repo = os.environ.get('GITHUB_REPO_URL', '')
+        github_issue = os.environ.get('GITHUB_ISSUE_URL', '')
         # Check if project folder is set
         project_folder = os.environ.get('PROJECT_FOLDER', '')
         if not project_folder:
@@ -98,7 +99,8 @@ def run_claude_cli(subject):
             'CLAUDE_SUBJECT': subject_formatted,
             'ALLOWED_TOOLS': 'Bash,Edit',
             'TIMEOUT': '300',
-            'GITHUB_REPO_URL': github_repo
+            'GITHUB_REPO_URL': github_repo,
+            'GITHUB_ISSUE_URL': github_issue
         })
         
         # Path to the shell script
@@ -253,23 +255,35 @@ def process_email(msg_data):
         # Extract GitHub repository URL using regex
         # Matches HTTPS, SSH URLs, issue URLs, and comment URLs
         github_url_pattern = r'(?:https?://(?:www\.)?github\.com/([^/\s]+/[^/\s#]+)(?:/issues/\d+(?:#\w+-\d+)?)?)'
-        match = re.search(github_url_pattern, body)
+        github_issue_pattern = r'https?://(?:www\.)?github\.com/[^/\s]+/[^/\s#]+/issues/\d+'
+        
+        repo_match = re.search(github_url_pattern, body)
+        issue_match = re.search(github_issue_pattern, body)
+        
+        # Skip our own status comments
+        if "✅" in body or "❌" in body:
+            if "Task failed:" in body or "completed successfully in" in body or "Commit task" in body:
+                logger.info('Ignoring email - Claude status notification')
+                return
         
         # Check for issue closure notifications before processing
         if "Closed #" in body and " as completed" in body:
             logger.info('Ignoring email - GitHub issue closure notification')
             return
         
-        if match:
-            repo_path = match.group(1)
+        if repo_match:
+            repo_path = repo_match.group(1)
             repo_url = f'https://github.com/{repo_path}'
             logger.info(f'Found GitHub repository URL: {repo_url}')
-            logger.debug(f'Original URL: {match.group(0)}')
-            logger.debug(f'Email body excerpt:\n{body[:500]}') # Log first 500 chars for debugging
             
-            # Store the repo URL in environment for later use
+            # Store both repo URL and issue URL in environment
             os.environ['GITHUB_REPO_URL'] = repo_url
-            logger.info(f'Repository URL stored in environment: {repo_url}')
+            if issue_match:
+                issue_url = issue_match.group(0)
+                os.environ['GITHUB_ISSUE_URL'] = issue_url
+                logger.info(f'Found GitHub issue URL: {issue_url}')
+            else:
+                logger.warning('No GitHub issue URL found in email body')
             
             # Only run Claude CLI if we found a GitHub repo URL
             return run_claude_cli(subject)
@@ -360,14 +374,14 @@ ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-$3}"
 ALLOWED_TOOLS="${ALLOWED_TOOLS:-$4}"
 TIMEOUT="${TIMEOUT:-${5:-240}}"
 GITHUB_REPO_URL="${GITHUB_REPO_URL:-$6}"
+GITHUB_ISSUE_URL="${GITHUB_ISSUE_URL:-$7}"
 
 # Set up logging
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="$SCRIPT_DIR/claude-execution.log"
 OUTPUT_FILE="$SCRIPT_DIR/claude-output.txt"
 
-echo $OUTPUT_FILE
-echo $LOG_FILE
+
 # Timestamp function
 timestamp() {
   date +"%Y-%m-%d %H:%M:%S"
@@ -381,6 +395,7 @@ echo "API Key present: $(if [ -n "$ANTHROPIC_API_KEY" ]; then echo "Yes"; else e
 echo "Allowed tools: $ALLOWED_TOOLS" >> "$LOG_FILE" 2>&1
 echo "Timeout: $TIMEOUT seconds" >> "$LOG_FILE" 2>&1
 echo "GitHub Repo URL: ${GITHUB_REPO_URL:-None}" >> "$LOG_FILE" 2>&1
+echo "GitHub Issue URL: ${GITHUB_ISSUE_URL:-None}" >> "$LOG_FILE" 2>&1
 
 # Change to project folder if provided
 if [ -n "$PROJECT_FOLDER" ]; then
@@ -412,29 +427,29 @@ if ! command -v gh &> /dev/null; then
   echo "WARNING: GitHub CLI not found in PATH - skipping repo clone" >> "$LOG_FILE" 2>&1
 else
   echo "GitHub CLI found at: $(which gh)" >> "$LOG_FILE" 2>&1
-
+  
   # Check if gh cli is authenticated
   if ! gh auth status &> /dev/null; then
     echo "WARNING: GitHub CLI not authenticated - skipping repo clone" >> "$LOG_FILE" 2>&1
   else
     echo "GitHub CLI authenticated successfully" >> "$LOG_FILE" 2>&1
-
+    
     # If we have a GitHub repo URL, try to clone it
     if [ -n "$GITHUB_REPO_URL" ]; then
       echo "Cloning repository from: $GITHUB_REPO_URL" >> "$LOG_FILE" 2>&1
-
+      
       # Extract repo owner and name from URL
       if [[ "$GITHUB_REPO_URL" =~ github\.com[:/]([^/]+)/([^/.]+) ]]; then
         REPO_OWNER="${BASH_REMATCH[1]}"
         REPO_NAME="${BASH_REMATCH[2]}"
-
+        
         # Create a clean workspace directory with repo name
         WORKSPACE="$PROJECT_FOLDER/workspace/$REPO_OWNER/$REPO_NAME"
         rm -rf "$WORKSPACE"
         mkdir -p "$WORKSPACE"
         cd "$WORKSPACE"
         pwd >> "$LOG_FILE" 2>&1
-
+        
         # Clone using gh cli which handles auth automatically
         if gh repo clone "$REPO_OWNER/$REPO_NAME" .; then
           echo "Successfully cloned repository to: $WORKSPACE" >> "$LOG_FILE" 2>&1
@@ -450,9 +465,51 @@ else
   fi
 fi
 
+# Function to extract issue number from GitHub URL
+extract_issue_number() {
+  local url="$1"
+  if [[ "$url" =~ /issues/([0-9]+) ]]; then
+    echo "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  return 1
+}
+
+# Function to post comment to GitHub issue
+post_issue_comment() {
+  local issue_number="$1"
+  local comment="$2"
+  local repo_path="$3"
+  
+  if [ -n "$issue_number" ] && [ -n "$repo_path" ]; then
+    gh issue comment "$issue_number" --body "$comment" --repo "$repo_path"
+    return $?
+  fi
+  return 1
+}
+
+# Extract repository information and issue number
+REPO_PATH=""
+ISSUE_NUMBER=""
+if [[ "$GITHUB_REPO_URL" =~ github\.com[:/]([^/]+)/([^/.]+) ]]; then
+  REPO_OWNER="${BASH_REMATCH[1]}"
+  REPO_NAME="${BASH_REMATCH[2]}"
+  REPO_PATH="$REPO_OWNER/$REPO_NAME"
+  
+  # Get issue number from GITHUB_ISSUE_URL if available
+  if [ -n "$GITHUB_ISSUE_URL" ]; then
+    ISSUE_NUMBER=$(extract_issue_number "$GITHUB_ISSUE_URL")
+  else
+    # Fallback to extracting from subject if needed
+    ISSUE_NUMBER=$(extract_issue_number "$CLAUDE_SUBJECT")
+  fi
+fi
+
 # Execute Claude CLI command with timeout to prevent hanging
 echo "Executing Claude CLI command at $(timestamp)..." >> "$LOG_FILE" 2>&1
 echo "Using subject: $CLAUDE_SUBJECT" >> "$LOG_FILE" 2>&1
+
+# Use NODE_OPTIONS to prevent file descriptor errors
 export NODE_OPTIONS="--no-warnings"
 
 START_TIME=$(date +%s)
@@ -466,19 +523,29 @@ DURATION=$((END_TIME - START_TIME))
 echo "Command execution took $DURATION seconds with exit code $EXIT_CODE" >> "$LOG_FILE" 2>&1
 
 if [ $EXIT_CODE -eq 124 ] || [ $EXIT_CODE -eq 137 ]; then
-  echo "ERROR: Claude CLI command timed out after $TIMEOUT seconds (exit code: $EXIT_CODE)" | tee -a "$LOG_FILE"
+  ERROR_MSG="ERROR: Claude CLI command timed out after $TIMEOUT seconds (exit code: $EXIT_CODE)"
+  echo "$ERROR_MSG" | tee -a "$LOG_FILE"
+  post_issue_comment "$ISSUE_NUMBER" "❌ Task failed: $ERROR_MSG" "$REPO_PATH"
   exit $EXIT_CODE
 elif [ $EXIT_CODE -ne 0 ]; then
-  echo "ERROR: Claude CLI command failed with exit code $EXIT_CODE" | tee -a "$LOG_FILE"
-  echo "Command took $DURATION seconds to complete" | tee -a "$LOG_FILE"
+  ERROR_MSG="ERROR: Claude CLI command failed with exit code $EXIT_CODE. Command took $DURATION seconds to complete"
+  echo "$ERROR_MSG" | tee -a "$LOG_FILE"
+  post_issue_comment "$ISSUE_NUMBER" "❌ Task failed: $ERROR_MSG" "$REPO_PATH"
   exit $EXIT_CODE
 else
-  echo "Claude CLI command completed successfully in $DURATION seconds" >> "$LOG_FILE" 2>&1
+  SUCCESS_MSG="✅ Claude CLI command completed successfully in $DURATION seconds"
+  echo "$SUCCESS_MSG" >> "$LOG_FILE" 2>&1
+  post_issue_comment "$ISSUE_NUMBER" "$SUCCESS_MSG" "$REPO_PATH"
 fi
 
+
 echo "Executing commit task at $(timestamp)..." >> "$LOG_FILE" 2>&1
-COMMIT_TASK="Review the git status and recent changes, then commit and push them using appropriate commit messages. Use git commands to check status, add files, commit, and push.At the end create pull request"
+# Check for changes and ask Claude to commit if needed
+COMMIT_TASK="Create a new branch for this issue and commit changes: then push them using appropriate commit messages. Use git commands to check status, add files, commit, and push.At the end create pull request"
+
+# Ensure NODE_OPTIONS is still set
 export NODE_OPTIONS="--no-warnings"
+
 START_TIME=$(date +%s)
 {
   timeout --kill-after=30 $TIMEOUT claude -p "$COMMIT_TASK" --allowedTools "Bash,Edit" 2>&1
@@ -490,6 +557,22 @@ DURATION=$((END_TIME - START_TIME))
 # Log completion
 echo "Claude CLI command completed at $(timestamp) with exit code: $EXIT_CODE" >> "$LOG_FILE" 2>&1
 echo "=== Claude execution completed at $(timestamp) ===" >> "$LOG_FILE" 2>&1
+
+if [ $COMMIT_EXIT_CODE -eq 124 ] || [ $COMMIT_EXIT_CODE -eq 137 ]; then
+  ERROR_MSG="ERROR: Commit task timed out after $TIMEOUT seconds (exit code: $COMMIT_EXIT_CODE)"
+  echo "$ERROR_MSG" | tee -a "$LOG_FILE"
+  post_issue_comment "$ISSUE_NUMBER" "❌ Commit task failed: $ERROR_MSG" "$REPO_PATH"
+  exit $COMMIT_EXIT_CODE
+elif [ $COMMIT_EXIT_CODE -ne 0 ]; then
+  ERROR_MSG="ERROR: Commit task failed with exit code $COMMIT_EXIT_CODE. Command took $DURATION seconds to complete"
+  echo "$ERROR_MSG" | tee -a "$LOG_FILE"
+  post_issue_comment "$ISSUE_NUMBER" "❌ Commit task failed: $ERROR_MSG" "$REPO_PATH"
+  exit $COMMIT_EXIT_CODE
+else
+  SUCCESS_MSG="✅ Commit task completed successfully in $DURATION seconds"
+  echo "$SUCCESS_MSG" >> "$LOG_FILE" 2>&1
+  post_issue_comment "$ISSUE_NUMBER" "$SUCCESS_MSG" "$REPO_PATH"
+fi
 
 # Output the result
 if [ -f "$OUTPUT_FILE" ]; then

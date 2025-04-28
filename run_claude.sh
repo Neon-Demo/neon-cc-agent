@@ -14,6 +14,7 @@ ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-$3}"
 ALLOWED_TOOLS="${ALLOWED_TOOLS:-$4}"
 TIMEOUT="${TIMEOUT:-${5:-240}}"
 GITHUB_REPO_URL="${GITHUB_REPO_URL:-$6}"
+GITHUB_ISSUE_URL="${GITHUB_ISSUE_URL:-$7}"
 
 # Set up logging
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,6 +35,7 @@ echo "API Key present: $(if [ -n "$ANTHROPIC_API_KEY" ]; then echo "Yes"; else e
 echo "Allowed tools: $ALLOWED_TOOLS" >> "$LOG_FILE" 2>&1
 echo "Timeout: $TIMEOUT seconds" >> "$LOG_FILE" 2>&1
 echo "GitHub Repo URL: ${GITHUB_REPO_URL:-None}" >> "$LOG_FILE" 2>&1
+echo "GitHub Issue URL: ${GITHUB_ISSUE_URL:-None}" >> "$LOG_FILE" 2>&1
 
 # Change to project folder if provided
 if [ -n "$PROJECT_FOLDER" ]; then
@@ -103,6 +105,46 @@ else
   fi
 fi
 
+# Function to extract issue number from GitHub URL
+extract_issue_number() {
+  local url="$1"
+  if [[ "$url" =~ /issues/([0-9]+) ]]; then
+    echo "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  return 1
+}
+
+# Function to post comment to GitHub issue
+post_issue_comment() {
+  local issue_number="$1"
+  local comment="$2"
+  local repo_path="$3"
+  
+  if [ -n "$issue_number" ] && [ -n "$repo_path" ]; then
+    gh issue comment "$issue_number" --body "$comment" --repo "$repo_path"
+    return $?
+  fi
+  return 1
+}
+
+# Extract repository information and issue number
+REPO_PATH=""
+ISSUE_NUMBER=""
+if [[ "$GITHUB_REPO_URL" =~ github\.com[:/]([^/]+)/([^/.]+) ]]; then
+  REPO_OWNER="${BASH_REMATCH[1]}"
+  REPO_NAME="${BASH_REMATCH[2]}"
+  REPO_PATH="$REPO_OWNER/$REPO_NAME"
+  
+  # Get issue number from GITHUB_ISSUE_URL if available
+  if [ -n "$GITHUB_ISSUE_URL" ]; then
+    ISSUE_NUMBER=$(extract_issue_number "$GITHUB_ISSUE_URL")
+  else
+    # Fallback to extracting from subject if needed
+    ISSUE_NUMBER=$(extract_issue_number "$CLAUDE_SUBJECT")
+  fi
+fi
+
 # Execute Claude CLI command with timeout to prevent hanging
 echo "Executing Claude CLI command at $(timestamp)..." >> "$LOG_FILE" 2>&1
 echo "Using subject: $CLAUDE_SUBJECT" >> "$LOG_FILE" 2>&1
@@ -121,14 +163,19 @@ DURATION=$((END_TIME - START_TIME))
 echo "Command execution took $DURATION seconds with exit code $EXIT_CODE" >> "$LOG_FILE" 2>&1
 
 if [ $EXIT_CODE -eq 124 ] || [ $EXIT_CODE -eq 137 ]; then
-  echo "ERROR: Claude CLI command timed out after $TIMEOUT seconds (exit code: $EXIT_CODE)" | tee -a "$LOG_FILE"
+  ERROR_MSG="ERROR: Claude CLI command timed out after $TIMEOUT seconds (exit code: $EXIT_CODE)"
+  echo "$ERROR_MSG" | tee -a "$LOG_FILE"
+  post_issue_comment "$ISSUE_NUMBER" "❌ Task failed: $ERROR_MSG" "$REPO_PATH"
   exit $EXIT_CODE
 elif [ $EXIT_CODE -ne 0 ]; then
-  echo "ERROR: Claude CLI command failed with exit code $EXIT_CODE" | tee -a "$LOG_FILE"
-  echo "Command took $DURATION seconds to complete" | tee -a "$LOG_FILE"
+  ERROR_MSG="ERROR: Claude CLI command failed with exit code $EXIT_CODE. Command took $DURATION seconds to complete"
+  echo "$ERROR_MSG" | tee -a "$LOG_FILE"
+  post_issue_comment "$ISSUE_NUMBER" "❌ Task failed: $ERROR_MSG" "$REPO_PATH"
   exit $EXIT_CODE
 else
-  echo "Claude CLI command completed successfully in $DURATION seconds" >> "$LOG_FILE" 2>&1
+  SUCCESS_MSG="✅ Claude CLI command completed successfully in $DURATION seconds"
+  echo "$SUCCESS_MSG" >> "$LOG_FILE" 2>&1
+  post_issue_comment "$ISSUE_NUMBER" "$SUCCESS_MSG" "$REPO_PATH"
 fi
 
 
@@ -150,6 +197,22 @@ DURATION=$((END_TIME - START_TIME))
 # Log completion
 echo "Claude CLI command completed at $(timestamp) with exit code: $EXIT_CODE" >> "$LOG_FILE" 2>&1
 echo "=== Claude execution completed at $(timestamp) ===" >> "$LOG_FILE" 2>&1
+
+if [ $COMMIT_EXIT_CODE -eq 124 ] || [ $COMMIT_EXIT_CODE -eq 137 ]; then
+  ERROR_MSG="ERROR: Commit task timed out after $TIMEOUT seconds (exit code: $COMMIT_EXIT_CODE)"
+  echo "$ERROR_MSG" | tee -a "$LOG_FILE"
+  post_issue_comment "$ISSUE_NUMBER" "❌ Commit task failed: $ERROR_MSG" "$REPO_PATH"
+  exit $COMMIT_EXIT_CODE
+elif [ $COMMIT_EXIT_CODE -ne 0 ]; then
+  ERROR_MSG="ERROR: Commit task failed with exit code $COMMIT_EXIT_CODE. Command took $DURATION seconds to complete"
+  echo "$ERROR_MSG" | tee -a "$LOG_FILE"
+  post_issue_comment "$ISSUE_NUMBER" "❌ Commit task failed: $ERROR_MSG" "$REPO_PATH"
+  exit $COMMIT_EXIT_CODE
+else
+  SUCCESS_MSG="✅ Commit task completed successfully in $DURATION seconds"
+  echo "$SUCCESS_MSG" >> "$LOG_FILE" 2>&1
+  post_issue_comment "$ISSUE_NUMBER" "$SUCCESS_MSG" "$REPO_PATH"
+fi
 
 # Output the result
 if [ -f "$OUTPUT_FILE" ]; then
