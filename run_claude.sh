@@ -15,6 +15,7 @@ ALLOWED_TOOLS="${ALLOWED_TOOLS:-$4}"
 TIMEOUT="${TIMEOUT:-${5:-240}}"
 GITHUB_REPO_URL="${GITHUB_REPO_URL:-$6}"
 GITHUB_ISSUE_URL="${GITHUB_ISSUE_URL:-$7}"
+GITHUB_COMMENT="${GITHUB_COMMENT:-}"
 
 # Set up logging
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,6 +32,9 @@ echo "=== Claude execution started at $(timestamp) ===" >> "$LOG_FILE" 2>&1
 echo "Script directory: $SCRIPT_DIR" >> "$LOG_FILE" 2>&1
 echo "Working directory: $(pwd)" >> "$LOG_FILE" 2>&1
 echo "Subject: $CLAUDE_SUBJECT" >> "$LOG_FILE" 2>&1
+if [ -n "$GITHUB_COMMENT" ]; then
+  echo "Using GitHub comment: ${GITHUB_COMMENT:0:50}..." >> "$LOG_FILE" 2>&1
+fi
 echo "API Key present: $(if [ -n "$ANTHROPIC_API_KEY" ]; then echo "Yes"; else echo "No"; fi)" >> "$LOG_FILE" 2>&1
 echo "Allowed tools: $ALLOWED_TOOLS" >> "$LOG_FILE" 2>&1
 echo "Timeout: $TIMEOUT seconds" >> "$LOG_FILE" 2>&1
@@ -148,13 +152,23 @@ fi
 # Execute Claude CLI command with timeout to prevent hanging
 echo "Executing Claude CLI command at $(timestamp)..." >> "$LOG_FILE" 2>&1
 echo "Using subject: $CLAUDE_SUBJECT" >> "$LOG_FILE" 2>&1
+if [ -n "$GITHUB_COMMENT" ]; then
+    echo "Using GitHub comment: ${GITHUB_COMMENT:0:50}..." >> "$LOG_FILE" 2>&1
+fi
 
 # Use NODE_OPTIONS to prevent file descriptor errors
 export NODE_OPTIONS="--no-warnings"
 
 START_TIME=$(date +%s)
 {
-  timeout --kill-after=30 $TIMEOUT claude -p "$CLAUDE_SUBJECT" --allowedTools "Bash,Edit" 2>&1
+    if [ -n "$GITHUB_COMMENT" ]; then
+        # If we have comment content, combine it with the subject
+        PROMPT="Subject: $CLAUDE_SUBJECT\n\nComment: $GITHUB_COMMENT"
+        timeout --kill-after=30 $TIMEOUT claude -p "$PROMPT" --allowedTools "Bash,Edit" 2>&1
+    else
+        # Otherwise just use the subject
+        timeout --kill-after=30 $TIMEOUT claude -p "$CLAUDE_SUBJECT" --allowedTools "Bash,Edit" 2>&1
+    fi
 } | tee -a "$OUTPUT_FILE" | tee -a "$LOG_FILE"
 EXIT_CODE=${PIPESTATUS[0]}
 END_TIME=$(date +%s)

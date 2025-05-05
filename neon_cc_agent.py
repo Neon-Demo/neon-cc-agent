@@ -79,7 +79,7 @@ def load_environment():
     logger.info(f"- Anthropic API Key: {'✓ Set' if os.environ.get('ANTHROPIC_API_KEY') else '✗ Not set'}")
 
 # Execute Claude CLI via shell script
-def run_claude_cli(subject):
+def run_claude_cli(subject, comment_content=None):
     try:
         github_repo = os.environ.get('GITHUB_REPO_URL', '')
         github_issue = os.environ.get('GITHUB_ISSUE_URL', '')
@@ -92,6 +92,11 @@ def run_claude_cli(subject):
         subject_formatted = subject.replace('\r', '').replace('\n', '  ')
         logger.info(f"Using subject: {subject_formatted[:50]}{'...' if len(subject_formatted) > 50 else ''}")
         
+        # Format comment content if present
+        if comment_content:
+            comment_formatted = comment_content.replace('\r', '').replace('\n', '  ')
+            logger.info(f"Using comment content: {comment_formatted[:50]}{'...' if len(comment_formatted) > 50 else ''}")
+        
         # Set environment variables for the script
         script_env = os.environ.copy()
         script_env.update({
@@ -100,13 +105,14 @@ def run_claude_cli(subject):
             'ALLOWED_TOOLS': 'Bash,Edit',
             'TIMEOUT': '300',
             'GITHUB_REPO_URL': github_repo,
-            'GITHUB_ISSUE_URL': github_issue
+            'GITHUB_ISSUE_URL': github_issue,
+            'GITHUB_COMMENT': comment_formatted if comment_content else ''
         })
         
         # Path to the shell script
         script_path = Path(__file__).parent / 'run_claude.sh'
         
-        # Ensure script is executable
+       # Ensure script is executable
         if not os.access(script_path, os.X_OK):
             os.chmod(script_path, 0o755)
         
@@ -285,8 +291,8 @@ def process_email(msg_data):
             else:
                 logger.warning('No GitHub issue URL found in email body')
             
-            # Only run Claude CLI if we found a GitHub repo URL
-            return run_claude_cli(subject)
+            # Pass both subject and entire body as comment content to Claude CLI
+            return run_claude_cli(subject, body)
         else:
             logger.warning('No GitHub repository URL found in email body')
             logger.debug(f'Email body excerpt:\n{body[:200]}') # Log first 200 chars when no URL found
@@ -375,6 +381,7 @@ ALLOWED_TOOLS="${ALLOWED_TOOLS:-$4}"
 TIMEOUT="${TIMEOUT:-${5:-240}}"
 GITHUB_REPO_URL="${GITHUB_REPO_URL:-$6}"
 GITHUB_ISSUE_URL="${GITHUB_ISSUE_URL:-$7}"
+GITHUB_COMMENT="${GITHUB_COMMENT:-}"
 
 # Set up logging
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -396,6 +403,9 @@ echo "Allowed tools: $ALLOWED_TOOLS" >> "$LOG_FILE" 2>&1
 echo "Timeout: $TIMEOUT seconds" >> "$LOG_FILE" 2>&1
 echo "GitHub Repo URL: ${GITHUB_REPO_URL:-None}" >> "$LOG_FILE" 2>&1
 echo "GitHub Issue URL: ${GITHUB_ISSUE_URL:-None}" >> "$LOG_FILE" 2>&1
+if [ -n "$GITHUB_COMMENT" ]; then
+  echo "Using GitHub comment: ${GITHUB_COMMENT:0:50}..." >> "$LOG_FILE" 2>&1
+fi
 
 # Change to project folder if provided
 if [ -n "$PROJECT_FOLDER" ]; then
@@ -508,13 +518,23 @@ fi
 # Execute Claude CLI command with timeout to prevent hanging
 echo "Executing Claude CLI command at $(timestamp)..." >> "$LOG_FILE" 2>&1
 echo "Using subject: $CLAUDE_SUBJECT" >> "$LOG_FILE" 2>&1
+if [ -n "$GITHUB_COMMENT" ]; then
+    echo "Using GitHub comment: ${GITHUB_COMMENT:0:50}..." >> "$LOG_FILE" 2>&1
+fi
 
 # Use NODE_OPTIONS to prevent file descriptor errors
 export NODE_OPTIONS="--no-warnings"
 
 START_TIME=$(date +%s)
 {
-  timeout --kill-after=30 $TIMEOUT claude -p "$CLAUDE_SUBJECT" --allowedTools "Bash,Edit" 2>&1
+  if [ -n "$GITHUB_COMMENT" ]; then
+        # If we have comment content, combine it with the subject
+        PROMPT="Subject: $CLAUDE_SUBJECT\n\nComment: $GITHUB_COMMENT"
+        timeout --kill-after=30 $TIMEOUT claude -p "$PROMPT" --allowedTools "Bash,Edit" 2>&1
+    else
+        # Otherwise just use the subject
+        timeout --kill-after=30 $TIMEOUT claude -p "$CLAUDE_SUBJECT" --allowedTools "Bash,Edit" 2>&1
+    fi
 } | tee -a "$OUTPUT_FILE" | tee -a "$LOG_FILE"
 EXIT_CODE=${PIPESTATUS[0]}
 END_TIME=$(date +%s)
@@ -541,7 +561,20 @@ fi
 
 echo "Executing commit task at $(timestamp)..." >> "$LOG_FILE" 2>&1
 # Check for changes and ask Claude to commit if needed
-COMMIT_TASK="Create a new branch for this issue and commit changes: then push them using appropriate commit messages. Use git commands to check status, add files, commit, and push.At the end create pull request"
+COMMIT_TASK="I am working on the following:
+
+Issue Subject: $CLAUDE_SUBJECT
+Issue URL: $GITHUB_ISSUE_URL
+Repository: $GITHUB_REPO_URL
+
+The changes I've made address this issue. Please:
+1. Create a new branch named after the issue
+2. Check git status to see changes
+3. Add and commit the changes with an appropriate commit message
+4. Push the branch
+5. Create a pull request
+
+Use git commands to perform these actions."
 
 # Ensure NODE_OPTIONS is still set
 export NODE_OPTIONS="--no-warnings"
