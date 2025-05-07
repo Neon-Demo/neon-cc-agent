@@ -32,14 +32,14 @@ echo "=== Claude execution started at $(timestamp) ===" >> "$LOG_FILE" 2>&1
 echo "Script directory: $SCRIPT_DIR" >> "$LOG_FILE" 2>&1
 echo "Working directory: $(pwd)" >> "$LOG_FILE" 2>&1
 echo "Subject: $CLAUDE_SUBJECT" >> "$LOG_FILE" 2>&1
-if [ -n "$GITHUB_COMMENT" ]; then
-  echo "Using GitHub comment: ${GITHUB_COMMENT:0:50}..." >> "$LOG_FILE" 2>&1
-fi
 echo "API Key present: $(if [ -n "$ANTHROPIC_API_KEY" ]; then echo "Yes"; else echo "No"; fi)" >> "$LOG_FILE" 2>&1
 echo "Allowed tools: $ALLOWED_TOOLS" >> "$LOG_FILE" 2>&1
 echo "Timeout: $TIMEOUT seconds" >> "$LOG_FILE" 2>&1
 echo "GitHub Repo URL: ${GITHUB_REPO_URL:-None}" >> "$LOG_FILE" 2>&1
 echo "GitHub Issue URL: ${GITHUB_ISSUE_URL:-None}" >> "$LOG_FILE" 2>&1
+if [ -n "$GITHUB_COMMENT" ]; then
+  echo "Using GitHub comment: ${GITHUB_COMMENT:0:50}..." >> "$LOG_FILE" 2>&1
+fi
 
 # Change to project folder if provided
 if [ -n "$PROJECT_FOLDER" ]; then
@@ -161,9 +161,11 @@ export NODE_OPTIONS="--no-warnings"
 
 START_TIME=$(date +%s)
 {
-    if [ -n "$GITHUB_COMMENT" ]; then
+  if [ -n "$GITHUB_COMMENT" ]; then
         # If we have comment content, combine it with the subject
-        PROMPT="Subject: $CLAUDE_SUBJECT\n\nComment: $GITHUB_COMMENT"
+        PROMPT="Subject: $CLAUDE_SUBJECT
+
+Comment: $GITHUB_COMMENT"
         timeout --kill-after=30 $TIMEOUT claude -p "$PROMPT" --allowedTools "Bash,Edit" 2>&1
     else
         # Otherwise just use the subject
@@ -195,7 +197,20 @@ fi
 
 echo "Executing commit task at $(timestamp)..." >> "$LOG_FILE" 2>&1
 # Check for changes and ask Claude to commit if needed
-COMMIT_TASK="Create a new branch for this issue and commit changes: then push them using appropriate commit messages. Use git commands to check status, add files, commit, and push.At the end create pull request"
+COMMIT_TASK="I am working on the following:
+
+Issue Subject: $CLAUDE_SUBJECT
+Issue URL: $GITHUB_ISSUE_URL
+Repository: $GITHUB_REPO_URL
+
+The changes I've made address this issue. Please:
+1. Create a new branch named after the issue
+2. Check git status to see changes
+3. Add and commit the changes with an appropriate commit message
+4. Push the branch
+5. Create a pull request
+
+Use git commands to perform these actions."
 
 # Ensure NODE_OPTIONS is still set
 export NODE_OPTIONS="--no-warnings"

@@ -5,19 +5,14 @@ import json
 import time
 import logging
 import subprocess
-import imaplib  # Using standard library imaplib
-import email
-import email.header
-import email.utils
-import re
-from email.parser import BytesParser
-from datetime import datetime
+import requests
+from datetime import datetime, timedelta
 from pathlib import Path
 from dotenv import load_dotenv
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,  # Change to INFO for more information
+    level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
@@ -54,29 +49,149 @@ def load_environment():
         logger.warning('You can create one by running: cp .env.example .env')
     
     # Check for required environment variables
-    required_vars = ['IMAP_USER', 'IMAP_PASSWORD', 'IMAP_HOST', 'ANTHROPIC_API_KEY']
+    required_vars = ['GITHUB_TOKEN', 'ANTHROPIC_API_KEY']
     missing_vars = [var for var in required_vars if not os.environ.get(var)]
     
     if missing_vars:
         logger.error(f"Error: Missing required environment variables: {', '.join(missing_vars)}")
         logger.error('Please create a .env file or set environment variables')
         sys.exit(1)
-    
-    # Check for recommended environment variables
-    if not os.environ.get('PROJECT_FOLDER'):
-        logger.warning('Warning: PROJECT_FOLDER environment variable not set')
-        logger.warning('Claude will run in the current directory instead of a specific project folder')
 
-    # Print configuration for debugging (hide password)
-    logger.info('IMAP Configuration:')
-    logger.info(f"- Server: {os.environ.get('IMAP_HOST')}")
-    logger.info(f"- Port: {os.environ.get('IMAP_PORT', '993')}")
-    logger.info(f"- User: {os.environ.get('IMAP_USER')}")
-    logger.info(f"- TLS Enabled: {os.environ.get('IMAP_TLS', 'true').lower() != 'false'}")
-    logger.info(f"- Mailbox: {os.environ.get('IMAP_MAILBOX', 'INBOX')}")
-    logger.info('Claude Configuration:')
-    logger.info(f"- Project Folder: {os.environ.get('PROJECT_FOLDER', '(current directory)')}")
-    logger.info(f"- Anthropic API Key: {'✓ Set' if os.environ.get('ANTHROPIC_API_KEY') else '✗ Not set'}")
+def check_webhook_events():
+    """Check GitHub notifications for the authenticated user"""
+    try:
+        headers = {
+            'Authorization': f"token {os.environ['GITHUB_TOKEN']}",
+            'Accept': 'application/vnd.github.v3+json'
+        }
+        
+        # Get unread notifications
+        logger.info("Fetching GitHub notifications...")
+        response = requests.get(
+            'https://api.github.com/notifications',
+            headers=headers,
+            params={'all': 'false'}  # Only get unread notifications
+        )
+        response.raise_for_status()
+        notifications = response.json()
+        logger.info(f"Found {len(notifications)} unread notifications")
+        
+        for notification in notifications:
+            try:
+                logger.info(f"Raw notification data: {json.dumps(notification, indent=2)}")
+                
+                # Check if notification has required fields
+                if not notification.get('subject') or not notification.get('repository'):
+                    logger.warning("Notification missing required fields")
+                    continue
+
+                # Only process issue and issue_comment notifications
+                notification_type = notification['subject'].get('type')
+                logger.info(f"Notification type: {notification_type}")
+                if not notification_type or notification_type not in ['Issue', 'IssueComment']:
+                    logger.debug(f"Skipping notification type: {notification_type}")
+                    continue
+
+                # Get the full issue/comment data
+                subject_url = notification['subject'].get('url')
+                latest_comment_url = notification['subject'].get('latest_comment_url')
+                
+                logger.info(f"Fetching data from: {subject_url}")
+                response = requests.get(
+                    subject_url,
+                    headers=headers
+                )
+                response.raise_for_status()
+                issue_data = response.json()
+
+                # Skip if issue is closed
+                if issue_data.get('state') == 'closed':
+                    logger.info(f"Skipping closed issue. Reason: {issue_data.get('state_reason', 'unknown')}")
+                    requests.patch(
+                        notification['url'],
+                        headers=headers
+                    )
+                    logger.info("Marked notification as read")
+                    continue
+
+                # Get issue title and URL
+                subject = issue_data.get('title', '')
+                issue_url = issue_data.get('html_url')
+
+                # Get comment content if available
+                if latest_comment_url:
+                    logger.info(f"Fetching latest comment from: {latest_comment_url}")
+                    response = requests.get(
+                        latest_comment_url,
+                        headers=headers
+                    )
+                    response.raise_for_status()
+                    comment_data = response.json()
+                    body = comment_data.get('body', '')
+                # else:
+                #     body = issue_data.get('body', '')
+
+                logger.info(f"Raw body content: {body}")
+                logger.info(f"Full issue data: {json.dumps(issue_data, indent=2)}")
+
+                # Extract repository information
+                repo_url = notification['repository'].get('html_url')
+                if not repo_url:
+                    logger.warning("No repository URL found in notification")
+                    continue
+                logger.info(f"Repository: {repo_url}")
+                
+                # Skip our own comments
+                if body and ("✅" in body or "❌" in body):
+                    if "Task failed:" in body or "completed successfully in" in body:
+                        logger.info('Ignoring notification - Claude status comment')
+                        continue
+
+                # Log all field values before checking
+                logger.info("Checking required fields:")
+                logger.info(f"Subject: '{subject}'")
+                logger.info(f"Body: '{body}'")
+                logger.info(f"Repo URL: '{repo_url}'")
+                logger.info(f"Issue URL: '{issue_url}'")
+
+                # if not all([subject, body, repo_url, issue_url]):
+                #     logger.warning('Missing required information from notification')
+                #     logger.warning(f"Missing fields: " + 
+                #         ", ".join([
+                #             f"subject" if not subject else "",
+                #             f"body" if not body else "",
+                #             f"repo_url" if not repo_url else "",
+                #             f"issue_url" if not issue_url else ""
+                #         ]).strip(", ")
+                #     )
+                #     continue
+
+                logger.info(f"Processing {'comment on' if notification_type == 'IssueComment' else 'issue'}: {subject}")
+                logger.info(f"Body: {body}")
+                logger.info(f"Issue URL: {issue_url}")
+
+                # Process with Claude
+                os.environ['GITHUB_REPO_URL'] = repo_url
+                os.environ['GITHUB_ISSUE_URL'] = issue_url
+                run_claude_cli(subject, body)
+
+                # Mark notification as read
+                if notification.get('url'):
+                    requests.patch(
+                        notification['url'],
+                        headers=headers
+                    )
+                    logger.info("Marked notification as read")
+                else:
+                    logger.warning("Could not mark notification as read - missing URL")
+
+            except Exception as e:
+                logger.error(f'Error processing notification: {str(e)}')
+                logger.debug(f"Notification data: {json.dumps(notification, indent=2)}")
+                continue
+
+    except Exception as e:
+        logger.error(f'Error checking notifications: {str(e)}')
 
 # Execute Claude CLI via shell script
 def run_claude_cli(subject, comment_content=None):
@@ -151,7 +266,7 @@ def run_claude_cli(subject, comment_content=None):
         # Save response to a log file with timestamp
         timestamp = datetime.now().isoformat().replace(':', '-')
         log_entry = f"""
-=== GitHub email received at {datetime.now().isoformat()} ===
+=== GitHub notification received at {datetime.now().isoformat()} ===
 Subject: {subject}
 
 Subject Only:
@@ -189,178 +304,6 @@ Subject Only:
             f.write(error_log_entry)
         
         return None
-
-# Process a single email
-def process_email(msg_data):
-    try:
-        raw_email = msg_data[0][1]
-        
-        # Parse the raw email
-        parser = BytesParser()
-        email_message = parser.parsebytes(raw_email)
-        
-        # Extract sender information
-        from_header = email_message.get('From', '')
-        from_addr = email.utils.parseaddr(from_header)[1]
-        
-        subject = email_message.get('Subject', 'No Subject')
-        # Decode subject if needed
-        if isinstance(subject, email.header.Header):
-            subject = str(subject)
-        
-        logger.info(f'Extracted email from: {from_addr}')
-        logger.info(f'Subject: {subject}')
-        
-        # Check if the email is from neon-cc-agent1@zerionsoftware.com (case insensitive)
-        if 'neon-cc-agent1@zerionsoftware.com' not in from_addr.lower():
-            logger.info('Ignoring email - not from GitHub notifications')
-            return
-        
-        logger.info('Processing GitHub notification email...')
-
-        # Extract email body
-        body = ""
-        html_body = ""
-        if email_message.is_multipart():
-            for part in email_message.walk():
-                content_type = part.get_content_type()
-                try:
-                    charset = part.get_content_charset() or 'utf-8'
-                    if content_type == "text/plain":
-                        body = part.get_payload(decode=True).decode(charset)
-                        logger.info(f'Extracted plain text body using charset: {charset}')
-                        break
-                    elif content_type == "text/html":
-                        html_body = part.get_payload(decode=True).decode(charset)
-                        logger.info(f'Found HTML body using charset: {charset}')
-                except Exception as e:
-                    logger.warning(f'Failed to decode part with charset {charset}: {str(e)}')
-                    continue
-        else:
-            try:
-                charset = email_message.get_content_charset() or 'utf-8'
-                content_type = email_message.get_content_type()
-                payload = email_message.get_payload(decode=True).decode(charset)
-                if content_type == "text/plain":
-                    body = payload
-                elif content_type == "text/html":
-                    html_body = payload
-                logger.info(f'Extracted {content_type} body using charset: {charset}')
-            except Exception as e:
-                logger.error(f'Failed to decode email body: {str(e)}')
-                return None
-
-        # If no plain text found, try to extract text from HTML
-        if not body:
-            logger.warning('No text content found in email (plain or HTML)')
-            return None
-
-        logger.info(f'Email body length: {len(body)} characters')
-        logger.info(f'Email body: {body}')
-        
-        # Extract GitHub repository URL using regex
-        # Matches HTTPS, SSH URLs, issue URLs, and comment URLs
-        github_url_pattern = r'(?:https?://(?:www\.)?github\.com/([^/\s]+/[^/\s#]+)(?:/issues/\d+(?:#\w+-\d+)?)?)'
-        github_issue_pattern = r'https?://(?:www\.)?github\.com/[^/\s]+/[^/\s#]+/issues/\d+'
-        
-        repo_match = re.search(github_url_pattern, body)
-        issue_match = re.search(github_issue_pattern, body)
-        
-        # Skip our own status comments
-        if "✅" in body or "❌" in body:
-            if "Task failed:" in body or "completed successfully in" in body or "Commit task" in body:
-                logger.info('Ignoring email - Claude status notification')
-                return
-        
-        # Check for issue closure notifications before processing
-        if "Closed #" in body and " as completed" in body:
-            logger.info('Ignoring email - GitHub issue closure notification')
-            return
-        
-        if repo_match:
-            repo_path = repo_match.group(1)
-            repo_url = f'https://github.com/{repo_path}'
-            logger.info(f'Found GitHub repository URL: {repo_url}')
-            
-            # Store both repo URL and issue URL in environment
-            os.environ['GITHUB_REPO_URL'] = repo_url
-            if issue_match:
-                issue_url = issue_match.group(0)
-                os.environ['GITHUB_ISSUE_URL'] = issue_url
-                logger.info(f'Found GitHub issue URL: {issue_url}')
-            else:
-                logger.warning('No GitHub issue URL found in email body')
-            
-            # Pass both subject and entire body as comment content to Claude CLI
-            return run_claude_cli(subject, body)
-        else:
-            logger.warning('No GitHub repository URL found in email body')
-            logger.debug(f'Email body excerpt:\n{body[:200]}') # Log first 200 chars when no URL found
-            return
-
-    except Exception as e:
-        logger.error(f'Error processing email: {str(e)}')
-
-# Connect to IMAP server and check for new emails
-def check_emails():
-    try:
-        # IMAP Configuration
-        imap_user = os.environ.get('IMAP_USER')
-        imap_password = os.environ.get('IMAP_PASSWORD')
-        imap_host = os.environ.get('IMAP_HOST')
-        imap_port = int(os.environ.get('IMAP_PORT', '993'))
-        imap_use_ssl = os.environ.get('IMAP_TLS', 'true').lower() != 'false'
-        imap_mailbox = os.environ.get('IMAP_MAILBOX', 'INBOX')
-        
-        # Connect to the IMAP server
-        if imap_use_ssl:
-            mail = imaplib.IMAP4_SSL(imap_host, imap_port)
-        else:
-            mail = imaplib.IMAP4(imap_host, imap_port)
-        
-        # Login
-        mail.login(imap_user, imap_password)
-        
-        # Select the mailbox
-        mail.select(imap_mailbox)
-        
-        # Search for unread emails
-        status, messages = mail.search(None, 'UNSEEN')
-        
-        if status != 'OK':
-            logger.error('Error searching for emails')
-            return
-        
-        # Get list of email IDs
-        email_ids = messages[0].split()
-        
-        if not email_ids:
-            logger.info('No new emails found')
-            return
-        
-        logger.info(f'Found {len(email_ids)} new emails')
-        
-        # Process each email
-        for email_id in email_ids:
-            # Fetch the email
-            status, msg_data = mail.fetch(email_id, '(RFC822)')
-            
-            if status != 'OK':
-                logger.error(f'Error fetching email ID {email_id}')
-                continue
-            
-            # Process the email
-            process_email(msg_data)
-            
-            # Mark as read
-            mail.store(email_id, '+FLAGS', '\\Seen')
-        
-        # Logout
-        mail.close()
-        mail.logout()
-        
-    except Exception as e:
-        logger.error(f'IMAP error: {str(e)}')
 
 # Create shell script for running Claude CLI
 def create_claude_script():
@@ -639,17 +582,17 @@ def main():
     # Create Claude script
     create_claude_script()
     
-    logger.info('IMAP email checker started')
-    logger.info('Polling for emails...')
+    logger.info('GitHub webhook checker started')
+    logger.info('Polling for webhook events...')
     
     # Main loop
-    polling_interval = 60  # Seconds
+    polling_interval = int(os.environ.get('POLLING_INTERVAL', 60))
     try:
         while True:
             try:
-                check_emails()
+                check_webhook_events()
             except Exception as e:
-                logger.error(f"Error during email check: {str(e)}")
+                logger.error(f"Error during webhook check: {str(e)}")
             
             # Wait for next check
             logger.info(f"Waiting {polling_interval} seconds before next check...")
