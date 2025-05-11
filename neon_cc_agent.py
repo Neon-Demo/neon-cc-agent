@@ -128,6 +128,9 @@ def check_webhook_events():
                     response.raise_for_status()
                     comment_data = response.json()
                     body = comment_data.get('body', '')
+                    if '✅ Commit task completed' in body: 
+                      logger.info('Ignoring notification - Claude status comment')
+                      continue
                 # else:
                 #     body = issue_data.get('body', '')
 
@@ -141,12 +144,6 @@ def check_webhook_events():
                     continue
                 logger.info(f"Repository: {repo_url}")
                 
-                # Skip our own comments
-                if body and ("✅" in body or "❌" in body):
-                    if "Task failed:" in body or "completed successfully in" in body:
-                        logger.info('Ignoring notification - Claude status comment')
-                        continue
-
                 # Log all field values before checking
                 logger.info("Checking required fields:")
                 logger.info(f"Subject: '{subject}'")
@@ -218,7 +215,7 @@ def run_claude_cli(subject, comment_content=None):
             'PROJECT_FOLDER': project_folder or '.',
             'CLAUDE_SUBJECT': subject_formatted,
             'ALLOWED_TOOLS': 'Bash,Edit',
-            'TIMEOUT': '300',
+            'TIMEOUT': '500',
             'GITHUB_REPO_URL': github_repo,
             'GITHUB_ISSUE_URL': github_issue,
             'GITHUB_COMMENT': comment_formatted if comment_content else ''
@@ -472,7 +469,7 @@ START_TIME=$(date +%s)
 {
   if [ -n "$GITHUB_COMMENT" ]; then
         # If we have comment content, combine it with the subject
-        PROMPT="Subject: $CLAUDE_SUBJECT\n\nComment: $GITHUB_COMMENT"
+        PROMPT="Subject: $CLAUDE_SUBJECT\n\nComment: $GITHUB_COMMENT\n\nNote: If the comment contains a new request that conflicts with the original issue, prioritize the comment as it is more recent."
         timeout --kill-after=30 $TIMEOUT claude -p "$PROMPT" --allowedTools "Bash,Edit" 2>&1
     else
         # Otherwise just use the subject
@@ -507,15 +504,24 @@ echo "Executing commit task at $(timestamp)..." >> "$LOG_FILE" 2>&1
 COMMIT_TASK="I am working on the following:
 
 Issue Subject: $CLAUDE_SUBJECT
+Issues Comment: $GITHUB_COMMENT
 Issue URL: $GITHUB_ISSUE_URL
 Repository: $GITHUB_REPO_URL
 
-The changes I've made address this issue. Please:
-1. Create a new branch named after the issue
-2. Check git status to see changes
-3. Add and commit the changes with an appropriate commit message
-4. Push the branch
-5. Create a pull request
+First, check if there's an existing branch for this issue:
+
+If an existing branch is found:
+1. Switch to the existing branch
+2. Add any new changes
+3. Commit with a descriptive message referencing the issue
+4. Push the updates
+5. Comment on the PR about the new changes
+
+If no existing branch is found:
+1. Create a new branch named 'fix/issue-{issue_number}'
+2. Add and commit changes with an appropriate message
+3. Push the branch
+4. Create a pull request linking to the issue
 
 Use git commands to perform these actions."
 
