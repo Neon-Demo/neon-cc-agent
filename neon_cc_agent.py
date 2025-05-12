@@ -128,11 +128,6 @@ def check_webhook_events():
                     response.raise_for_status()
                     comment_data = response.json()
                     body = comment_data.get('body', '')
-                    if '✅ Commit task completed' in body: 
-                      logger.info('Ignoring notification - Claude status comment')
-                      continue
-                # else:
-                #     body = issue_data.get('body', '')
 
                 logger.info(f"Raw body content: {body}")
                 logger.info(f"Full issue data: {json.dumps(issue_data, indent=2)}")
@@ -151,17 +146,6 @@ def check_webhook_events():
                 logger.info(f"Repo URL: '{repo_url}'")
                 logger.info(f"Issue URL: '{issue_url}'")
 
-                # if not all([subject, body, repo_url, issue_url]):
-                #     logger.warning('Missing required information from notification')
-                #     logger.warning(f"Missing fields: " + 
-                #         ", ".join([
-                #             f"subject" if not subject else "",
-                #             f"body" if not body else "",
-                #             f"repo_url" if not repo_url else "",
-                #             f"issue_url" if not issue_url else ""
-                #         ]).strip(", ")
-                #     )
-                #     continue
 
                 logger.info(f"Processing {'comment on' if notification_type == 'IssueComment' else 'issue'}: {subject}")
                 logger.info(f"Body: {body}")
@@ -240,7 +224,7 @@ def run_claude_cli(subject, comment_content=None):
         )
         
         try:
-            stdout, stderr = process.communicate(timeout=360)
+            stdout, stderr = process.communicate(timeout=560)
         except subprocess.TimeoutExpired:
             process.kill()
             stdout, stderr = process.communicate()
@@ -592,7 +576,7 @@ def main():
     logger.info('Polling for webhook events...')
     
     # Main loop
-    polling_interval = int(os.environ.get('POLLING_INTERVAL', 60))
+    polling_interval = int(os.environ.get('POLLING_INTERVAL', 30))
     try:
         while True:
             try:
