@@ -90,6 +90,10 @@ def check_webhook_events():
                 logger.info(f"Notification type: {notification_type}")
                 if not notification_type or notification_type not in ['Issue', 'IssueComment']:
                     logger.debug(f"Skipping notification type: {notification_type}")
+                    requests.patch(
+                        notification['url'],
+                        headers=headers
+                    )
                     continue
 
                 # Get the full issue/comment data
@@ -104,9 +108,11 @@ def check_webhook_events():
                 response.raise_for_status()
                 issue_data = response.json()
 
-                # Skip if issue is closed
-                if issue_data.get('state') == 'closed':
-                    logger.info(f"Skipping closed issue. Reason: {issue_data.get('state_reason', 'unknown')}")
+                # Skip notifications without comments when issue is closed/reopened/completed
+                if not body and (issue_data.get('state') == 'closed' or 
+                               issue_data.get('state_reason') in ['reopened', 'completed']):
+                    logger.info(f"Skipping notification without comment. State: {issue_data.get('state')}, "
+                              f"Reason: {issue_data.get('state_reason', 'unknown')}")
                     requests.patch(
                         notification['url'],
                         headers=headers
@@ -224,7 +230,7 @@ def run_claude_cli(subject, comment_content=None):
         )
         
         try:
-            stdout, stderr = process.communicate(timeout=560)
+            stdout, stderr = process.communicate(timeout=540)
         except subprocess.TimeoutExpired:
             process.kill()
             stdout, stderr = process.communicate()
@@ -492,22 +498,30 @@ Issues Comment: $GITHUB_COMMENT
 Issue URL: $GITHUB_ISSUE_URL
 Repository: $GITHUB_REPO_URL
 
-First, check if there's an existing branch for this issue:
+Instructions for handling the issue:
 
-If an existing branch is found:
-1. Switch to the existing branch
-2. Add any new changes
-3. Commit with a descriptive message referencing the issue
-4. Push the updates
-5. Comment on the PR about the new changes
+1. Check PR status:
+   - Search for PRs linked to issue #\${ISSUE_NUMBER}
+   - Determine if any PRs are open or closed
 
-If no existing branch is found:
-1. Create a new branch named 'fix/issue-{issue_number}'
-2. Add and commit changes with an appropriate message
-3. Push the branch
-4. Create a pull request linking to the issue
+2. Handle based on PR status:
+   a) If open PR exists:
+      - Update existing branch
+      - Add new changes
+      - Push updates
+      - Add comment about changes
 
-Use git commands to perform these actions."
+   b) If only closed PRs exist (reopened issue):
+      - Create new branch with timestamp
+      - Add changes
+      - Create new PR
+      - Link to original issue
+
+   c) If no PRs exist:
+      - Create new branch
+      - Add initial changes
+      - Create first PR
+      Please process these changes following Git best practices."
 
 # Ensure NODE_OPTIONS is still set
 export NODE_OPTIONS="--no-warnings"
