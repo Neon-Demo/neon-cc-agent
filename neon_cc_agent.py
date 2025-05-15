@@ -108,6 +108,22 @@ def check_webhook_events():
                 response.raise_for_status()
                 issue_data = response.json()
 
+                # Get issue title and URL
+                subject = issue_data.get('title', '')
+                issue_url = issue_data.get('html_url')
+
+                # Get comment content if available
+                body = ''
+                if latest_comment_url:
+                    logger.info(f"Fetching latest comment from: {latest_comment_url}")
+                    response = requests.get(
+                        latest_comment_url,
+                        headers=headers
+                    )
+                    response.raise_for_status()
+                    comment_data = response.json()
+                    body = comment_data.get('body', '')
+
                 # Skip notifications without comments when issue is closed/reopened/completed
                 if not body and (issue_data.get('state') == 'closed' or 
                                issue_data.get('state_reason') in ['reopened', 'completed']):
@@ -120,20 +136,36 @@ def check_webhook_events():
                     logger.info("Marked notification as read")
                     continue
 
-                # Get issue title and URL
-                subject = issue_data.get('title', '')
-                issue_url = issue_data.get('html_url')
-
-                # Get comment content if available
-                if latest_comment_url:
-                    logger.info(f"Fetching latest comment from: {latest_comment_url}")
-                    response = requests.get(
-                        latest_comment_url,
-                        headers=headers
-                    )
-                    response.raise_for_status()
-                    comment_data = response.json()
-                    body = comment_data.get('body', '')
+                # If there's a comment on a closed issue, reopen it first
+                if body and issue_data.get('state') == 'closed':
+                    try:
+                        logger.info(f"Found comment on closed issue #{issue_data['number']}, reopening...")
+                        repo_full_name = notification['repository']['full_name']
+                        issue_api_url = f"https://api.github.com/repos/{repo_full_name}/issues/{issue_data['number']}"
+                        
+                        # Reopen the issue
+                        response = requests.patch(
+                            issue_api_url,
+                            headers=headers,
+                            json={'state': 'open', 'state_reason': None}  # Clear the state reason when reopening
+                        )
+                        response.raise_for_status()
+                        
+                        # Add a comment about automatic reopening
+                        comment_url = f"{issue_api_url}/comments"
+                        response = requests.post(
+                            comment_url,
+                            headers=headers,
+                            json={'body': 'Issue automatically reopened due to new comment with task.'}
+                        )
+                        response.raise_for_status()
+                        
+                        logger.info(f"Successfully reopened issue #{issue_data['number']} and added system comment")
+                        issue_data['state'] = 'open'  # Update local state to reflect change
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to reopen issue: {str(e)}")
+                        # Continue processing anyway since we have a valid comment
 
                 logger.info(f"Raw body content: {body}")
                 logger.info(f"Full issue data: {json.dumps(issue_data, indent=2)}")
