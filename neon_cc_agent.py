@@ -275,7 +275,7 @@ def run_claude_cli(subject, comment_content=None):
         if not os.access(script_path, os.X_OK):
             os.chmod(script_path, 0o755)
         
-        logger.info('Executing shell script to run Claude CLI...')
+        logger.info('Executing shell script to run Claude CLI in QA env...')
         
         # Execute with a timeout (6 minutes)
         process = subprocess.Popen(
