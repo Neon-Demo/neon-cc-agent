@@ -124,6 +124,22 @@ def check_webhook_events():
                     comment_data = response.json()
                     body = comment_data.get('body', '')
 
+                # Skip automated system comments
+                system_comment_patterns = [
+                    "Claude CLI command completed successfully",
+                    "Issue automatically reopened due to new comment",
+                    "Added new changes for issue #",
+                    "Commit task completed successfully"
+                ]
+                if any(pattern in body for pattern in system_comment_patterns):
+                    logger.info(f"Skipping automated system comment: {body[:100]}...")
+                    requests.patch(
+                        notification['url'],
+                        headers=headers
+                    )
+                    logger.info("Marked notification as read")
+                    continue
+
                 # Skip notifications without comments when issue is closed/reopened/completed
                 if not body and (issue_data.get('state') == 'closed' or 
                                issue_data.get('state_reason') in ['reopened', 'completed']):
@@ -538,6 +554,7 @@ Instructions for handling the issue:
 
 2. Handle based on PR status:
    a) If open PR exists:
+      - Switch to existing branch using format: issue-$number-$descOfIssue
       - Update existing branch
       - Add new changes
       - Push updates
@@ -550,7 +567,7 @@ Instructions for handling the issue:
       - Link to original issue
 
    c) If no PRs exist:
-      - Create new branch
+      - Create new branch using format: issue-$number-$descOfIssue
       - Add initial changes
       - Create first PR
       Please process these changes following Git best practices."
