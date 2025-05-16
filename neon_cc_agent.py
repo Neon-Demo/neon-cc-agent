@@ -110,8 +110,10 @@ def check_webhook_events():
                 subject = issue_data.get('title', '')
                 issue_url = issue_data.get('html_url')
 
+                # Initialize body with the issue's body content
+                body = issue_data.get('body', '')
+
                 # Get the latest comment using comments endpoint
-                body = ''
                 repo_full_name = notification['repository']['full_name']
                 issue_number = issue_data['number']
                 comments_url = f"https://api.github.com/repos/{repo_full_name}/issues/{issue_number}/comments"
@@ -120,7 +122,6 @@ def check_webhook_events():
                 response = requests.get(
                     comments_url,
                     headers=headers,
-                    # params={'sort': 'created', 'direction': 'desc', 'per_page': 1}  # Get most recent comment
                 )
                 response.raise_for_status()
                 comments = response.json()
@@ -129,6 +130,8 @@ def check_webhook_events():
                     latest_comment = comments[-1]  # Get the last comment (most recent)
                     body = latest_comment.get('body', '')
                     logger.info(f"Found latest comment (ID: {latest_comment['id']}) created at: {latest_comment['created_at']}")
+                else:
+                    logger.info("No comments found, using issue body")
 
                 # Skip automated system comments
                 system_comment_patterns = [
