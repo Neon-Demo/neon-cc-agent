@@ -98,8 +98,6 @@ def check_webhook_events():
 
                 # Get the full issue/comment data
                 subject_url = notification['subject'].get('url')
-                latest_comment_url = notification['subject'].get('latest_comment_url')
-                
                 logger.info(f"Fetching data from: {subject_url}")
                 response = requests.get(
                     subject_url,
@@ -112,17 +110,25 @@ def check_webhook_events():
                 subject = issue_data.get('title', '')
                 issue_url = issue_data.get('html_url')
 
-                # Get comment content if available
+                # Get the latest comment using comments endpoint
                 body = ''
-                if latest_comment_url:
-                    logger.info(f"Fetching latest comment from: {latest_comment_url}")
-                    response = requests.get(
-                        latest_comment_url,
-                        headers=headers
-                    )
-                    response.raise_for_status()
-                    comment_data = response.json()
-                    body = comment_data.get('body', '')
+                repo_full_name = notification['repository']['full_name']
+                issue_number = issue_data['number']
+                comments_url = f"https://api.github.com/repos/{repo_full_name}/issues/{issue_number}/comments"
+                
+                logger.info(f"Fetching comments from: {comments_url}")
+                response = requests.get(
+                    comments_url,
+                    headers=headers,
+                    # params={'sort': 'created', 'direction': 'desc', 'per_page': 1}  # Get most recent comment
+                )
+                response.raise_for_status()
+                comments = response.json()
+                
+                if comments:
+                    latest_comment = comments[-1]  # Get the last comment (most recent)
+                    body = latest_comment.get('body', '')
+                    logger.info(f"Found latest comment (ID: {latest_comment['id']}) created at: {latest_comment['created_at']}")
 
                 # Skip automated system comments
                 system_comment_patterns = [
@@ -561,7 +567,7 @@ Instructions for handling the issue:
       - Add comment about changes
 
    b) If only closed PRs exist (reopened issue):
-      - Create new branch with timestamp
+      - Create new branch using format: issue-$number-$descOfIssue
       - Add changes
       - Create new PR
       - Link to original issue
