@@ -563,19 +563,19 @@ Instructions for handling the issue:
 
 2. Handle based on PR status:
    a) If open PR exists:
-      - Switch to existing branch using exactly this format: issue-$number-$descOfIssue
+      - Switch to existing branch using exactly this format: issue-$number
       - Update existing branch
       - Add new changes
       - Push updates
       - Add comment about changes
 
    b) If only closed PRs exist (reopened issue):
-      - Create new branch using exactly this format: issue-$number-$descOfIssue
+      - Create new branch using exactly this format: issue-$number
       - Add changes
       - Create new PR
 
    c) If no PRs exist:
-      - Create new branch using exactly this format: issue-$number-$descOfIssue
+      - Create new branch using exactly this format: issue-$number
       - Add initial changes
       - Create first PR
       Please process these changes following Git best practices. 
