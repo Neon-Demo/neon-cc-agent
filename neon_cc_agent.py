@@ -563,23 +563,25 @@ Instructions for handling the issue:
 
 2. Handle based on PR status:
    a) If open PR exists:
-      - Switch to existing branch using exactly this format: issue-$number
+      - Switch to existing branch
       - Update existing branch
       - Add new changes
       - Push updates
       - Add comment about changes
 
    b) If only closed PRs exist (reopened issue):
-      - Create new branch using exactly this format: issue-$number
+      - Create new branch
       - Add changes
+      - Push updates
       - Create new PR
 
    c) If no PRs exist:
-      - Create new branch using exactly this format: issue-$number
+      - Create new branch
       - Add initial changes
+      - Push updates
       - Create first PR
       Please process these changes following Git best practices. 
-      Note do not commit into main branch, always create a new branch or switch to existing branch and create a PR if needed."
+      Note do not commit into main branch."
 
 # Ensure NODE_OPTIONS is still set
 export NODE_OPTIONS="--no-warnings"
