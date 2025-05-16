@@ -575,7 +575,8 @@ Instructions for handling the issue:
       - Create new branch using exactly this format: issue-$number-$descOfIssue
       - Add initial changes
       - Create first PR
-      Please process these changes following Git best practices."
+      Please process these changes following Git best practices. 
+      Note do not commit into main branch, always create a new branch or switch to existing branch and create a PR if needed."
 
 # Ensure NODE_OPTIONS is still set
 export NODE_OPTIONS="--no-warnings"
